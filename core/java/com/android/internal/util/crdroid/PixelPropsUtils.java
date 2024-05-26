@@ -409,18 +409,55 @@ public class PixelPropsUtils {
         }
     }
 
-    private static void spoofBuildGms() {
-        // Alter build parameters to avoid hardware attestation enforcement
-        setPropValue("BRAND", "motorola");
-        setPropValue("MANUFACTURER", "motorola");
-        setPropValue("DEVICE", "clark");
-        setPropValue("ID", "MPHS24.49-18-8");
-        setPropValue("FINGERPRINT", "motorola/clark_retus/clark:6.0/MPHS24.49-18-8/4:user/release-keys");
-        setPropValue("MODEL", "XT1575");
-        setPropValue("PRODUCT", "clark_retus");
-        setVersionFieldString("SECURITY_PATCH", "2016-09-01");
-    }
+    public static void spoofBuildGms() {
+        String packageName = "com.goolag.pif";
 
+        if (!Utils.isPackageInstalled(context, packageName)) {
+            Log.e(TAG, "'" + packageName + "' is not installed.");
+            return;
+        }
+
+        PackageManager pm = context.getPackageManager();
+
+        try {
+            Resources resources = pm.getResourcesForApplication(packageName);
+
+            int resourceId = resources.getIdentifier("device_arrays", "array", packageName);
+            if (resourceId != 0) {
+                String[] deviceArrays = resources.getStringArray(resourceId);
+
+                if (deviceArrays.length > 0) {
+                    int randomIndex = new Random().nextInt(deviceArrays.length);
+                    int selectedArrayResId = resources.getIdentifier(deviceArrays[randomIndex], "array", packageName);
+                    String selectedArrayName = resources.getResourceEntryName(selectedArrayResId);
+                    String[] selectedDeviceProps = resources.getStringArray(selectedArrayResId);
+
+                    setPropValue("MANUFACTURER", selectedDeviceProps[0]);
+                    setPropValue("MODEL", selectedDeviceProps[1]);
+                    setPropValue("FINGERPRINT", selectedDeviceProps[2]);
+                    setPropValue("BRAND", selectedDeviceProps[3]);
+                    setPropValue("PRODUCT", selectedDeviceProps[4]);
+                    setPropValue("DEVICE", selectedDeviceProps[5].isEmpty() ? getDeviceName(selectedDeviceProps[2]) : selectedDeviceProps[5]);
+                    setVersionFieldString("RELEASE", selectedDeviceProps[6]);
+                    setPropValue("ID", selectedDeviceProps[7].isEmpty() ? getBuildID(selectedDeviceProps[2]) : selectedDeviceProps[7]);
+                    setVersionFieldString("INCREMENTAL", selectedDeviceProps[8]);
+                    setPropValue("TYPE", selectedDeviceProps[9].isEmpty() ? "user" : selectedDeviceProps[9]);
+                    setPropValue("TAGS", selectedDeviceProps[10].isEmpty() ? "release-keys" : selectedDeviceProps[10]);
+                    setVersionFieldString("SECURITY_PATCH", selectedDeviceProps[11]);
+                    setVersionFieldInt("DEVICE_INITIAL_SDK_INT", Integer.parseInt(selectedDeviceProps[12]));
+
+                    Settings.System.putString(context.getContentResolver(), Settings.System.PPU_SPOOF_BUILD_GMS_ARRAY, selectedArrayName);
+                } else {
+                    Log.e(TAG, "No device arrays found.");
+                }
+            } else {
+                Log.e(TAG, "Resource 'device_arrays' not found.");
+            }
+
+        } catch (PackageManager.NameNotFoundException e) {
+            Log.e(TAG, "Error getting resources for '" + packageName + "': " + e.getMessage());
+        }
+    }
     private static boolean isCallerSafetyNet() {
         return sIsGms && Arrays.stream(Thread.currentThread().getStackTrace())
                 .anyMatch(elem -> elem.getClassName().contains("DroidGuard"));

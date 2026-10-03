@@ -7172,10 +7172,10 @@ public final class DisplayManagerService extends SystemService {
         public void createFreeformLocked(String name, ILMOFreeformDisplayCallback callback,
                 int width, int height, int densityDpi, boolean secure, boolean ownContentOnly,
                 boolean shouldShowSystemDecorations, Surface surface, float refreshRate,
-                long presentationDeadlineNanos) {
+                long presentationDeadlineNanos, int hostDisplayId) {
             mFreeformDisplayAdapter.createFreeformLocked(name, callback, width, height, densityDpi,
                     secure, ownContentOnly, shouldShowSystemDecorations, surface, refreshRate,
-                    presentationDeadlineNanos);
+                    presentationDeadlineNanos, hostDisplayId);
         }
 
         public void resizeFreeform(IBinder appToken, int width, int height, int densityDpi) {
@@ -7184,6 +7184,10 @@ public final class DisplayManagerService extends SystemService {
 
         public void releaseFreeform(IBinder appToken) {
             mFreeformDisplayAdapter.releaseFreeform(appToken);
+        }
+
+        public void setFreeformSurface(IBinder appToken, Surface surface) {
+            mFreeformDisplayAdapter.setFreeformSurface(appToken, surface);
         }
     }
 

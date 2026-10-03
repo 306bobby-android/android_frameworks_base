@@ -531,12 +531,14 @@ public abstract class DisplayManagerInternal {
     public abstract void createFreeformLocked(String name, ILMOFreeformDisplayCallback callback,
             int width, int height, int densityDpi, boolean secure, boolean ownContentOnly,
             boolean shouldShowSystemDecorations, Surface surface, float refreshRate,
-            long presentationDeadlineNanos);
+            long presentationDeadlineNanos, int hostDisplayId);
 
     public abstract void resizeFreeform(IBinder appToken, int width, int height,
             int densityDpi);
 
     public abstract void releaseFreeform(IBinder appToken);
+
+    public abstract void setFreeformSurface(IBinder appToken, Surface surface);
 
     /**
      * Get group id for given display id

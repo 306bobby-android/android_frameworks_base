@@ -1221,7 +1221,10 @@ class LogicalDisplayMapper implements DisplayDeviceRepository.Listener {
                 !needsOwnDisplayGroup && linkedDeviceUniqueId != null;
         final boolean hasDeviceDisplayGroup =
                 deviceDisplayGroupId != null && groupId == deviceDisplayGroupId;
-        if (groupId == Display.INVALID_DISPLAY_GROUP
+        final int lmoHostGroupId = getLmoFreeformHostGroupIdLocked(displayDevice);
+        if (lmoHostGroupId != Display.INVALID_DISPLAY_GROUP) {
+            groupId = lmoHostGroupId;
+        } else if (groupId == Display.INVALID_DISPLAY_GROUP
                 || hasOwnDisplayGroup != needsOwnDisplayGroup
                 || hasDeviceDisplayGroup != needsDeviceDisplayGroup
                 || decidedGroupId != Display.INVALID_DISPLAY_GROUP) {
@@ -1463,6 +1466,17 @@ class LogicalDisplayMapper implements DisplayDeviceRepository.Listener {
                 ? mCurrentLayout : mDeviceStateToLayoutMap.get(mDeviceState.getIdentifier());
         Layout.Display displayLayout = layout.getByAddress(info.address);
         return displayLayout != null && displayLayout.isEnabled();
+    }
+
+    /**
+     * An LMOFreeform display is only visible through its window on the host display, so it has to
+     * sleep and wake with that display rather than with the default group.
+     */
+    private int getLmoFreeformHostGroupIdLocked(DisplayDevice device) {
+        if (!(device instanceof LMOFreeformDisplayAdapter.FreeformDisplayDevice lmoDevice)) {
+            return Display.INVALID_DISPLAY_GROUP;
+        }
+        return getDisplayGroupIdFromDisplayIdLocked(lmoDevice.getHostDisplayId());
     }
 
     private int assignDisplayGroupIdLocked(boolean needsDeviceDisplayGroup,

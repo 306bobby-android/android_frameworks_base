@@ -1455,6 +1455,13 @@ class ActivityStarter {
             intentGrants = null;
         }
 
+        // LMOFreeform replays the launch once its window display on the desktop is up.
+        if (!abort && balVerdict.allows() && LMOFreeformDesktop.interceptLaunch(mService, intent,
+                resolvedType, aInfo, userId, callingUid, callingPackage, callingFeatureId,
+                suggestedLaunchDisplayArea, sourceRecord, resultRecord, inTask, inTaskFragment)) {
+            abort = true;
+        }
+
         if (abort) {
             if (resultRecord != null) {
                 resultRecord.sendResult(INVALID_UID, resultWho, requestCode, RESULT_CANCELED,

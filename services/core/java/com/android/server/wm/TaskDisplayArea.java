@@ -361,7 +361,8 @@ final class TaskDisplayArea extends DisplayArea<WindowContainer> {
         //
         // Displays with {@code mDontMoveToTop} property set to {@code true} won't be
         // allowed to top neither.
-        if ((!mDisplayContent.isTrusted() || mDisplayContent.mDontMoveToTop)
+        if ((!mDisplayContent.isTrusted() || mDisplayContent.mDontMoveToTop
+                || mDisplayContent.isDesktopFreeformDisplay())
                 && !getParent().isOnTop()) {
             includingParents = false;
         }

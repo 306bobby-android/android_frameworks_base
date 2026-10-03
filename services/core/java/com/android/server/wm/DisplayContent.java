@@ -2947,7 +2947,8 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
             }
 
             // Check if input device can dispatch events to current display.
-            if (!mWmService.mInputManager.canDispatchToDisplay(device.getId(), mDisplayId)) {
+            if (!mWmService.mInputManager.canDispatchToDisplay(device.getId(), mDisplayId)
+                    && !isHostKeyboardOfDesktopFreeform(device)) {
                 continue;
             }
 
@@ -3778,6 +3779,14 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         }
     }
 
+    // The desktop keyboard is associated with the host display but its keys are forwarded here,
+    // so this display must report it too or the local IME would show over it.
+    private boolean isHostKeyboardOfDesktopFreeform(InputDevice device) {
+        if (!isDesktopFreeformDisplay()) return false;
+        final int associatedDisplayId = device.getAssociatedDisplayId();
+        return associatedDisplayId != INVALID_DISPLAY && associatedDisplayId != DEFAULT_DISPLAY;
+    }
+
     DisplayCutout loadDisplayCutout(int displayWidth, int displayHeight) {
         if (mDisplayPolicy == null || mInitialDisplayCutout == null) {
             return null;
@@ -4339,6 +4348,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
         if ((mDisplayInfo.flags & Display.FLAG_STEAL_TOP_FOCUS_DISABLED) != 0) {
             return false;
         }
+        // Taking top focus from the host would leave the host's keyboard with no focused window.
+        if (isDesktopFreeformDisplay()) {
+            return false;
+        }
         return mWmService.mDisplayWindowSettings.canStealTopFocus(this);
     }
 
@@ -4793,6 +4806,10 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
     // changes to those result in RootWindowContainer.updateDisplayImePolicyCache()
     // being called.
     @DisplayImePolicy int getImePolicy() {
+        // Falling back would pop the phone's soft keyboard for a desktop app.
+        if (isDesktopFreeformDisplay()) {
+            return DISPLAY_IME_POLICY_LOCAL;
+        }
         if (!isTrusted()) {
             return DISPLAY_IME_POLICY_FALLBACK_DISPLAY;
         }
@@ -7189,7 +7206,17 @@ class DisplayContent extends RootDisplayArea implements WindowManagerPolicy.Disp
      */
     boolean hasOwnFocus() {
         return mWmService.mPerDisplayFocusEnabled
-                || (mDisplayInfo.flags & Display.FLAG_OWN_FOCUS) != 0;
+                || (mDisplayInfo.flags & Display.FLAG_OWN_FOCUS) != 0
+                // Keys reach it through its window on the host, which keeps top focus.
+                || isDesktopFreeformDisplay();
+    }
+
+    /**
+     * An LMOFreeform display shown on a desktop display. DisplayManager puts it in its host's
+     * display group, so anything outside the default group is hosted on a desktop.
+     */
+    boolean isDesktopFreeformDisplay() {
+        return isFreeformDisplay && mDisplayInfo.displayGroupId != Display.DEFAULT_DISPLAY_GROUP;
     }
 
     /**

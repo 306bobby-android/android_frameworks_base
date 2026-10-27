@@ -295,6 +295,11 @@ public final class PlayIntegritySpoofService {
                 return;
             }
 
+            // Same value spoofProperties() puts in ro.product.first_api_level, so the
+            // field and the prop agree.
+            mBuildFields.put("DEVICE_INITIAL_SDK_INT",
+                    resolveDeviceInitialSdk(mBuildFields.get("DEVICE"), mDeviceInitialSdkInt));
+
             mConfigLoaded = true;
             Log.i(TAG, "PIF config loaded, fields=" + mBuildFields.size()
                     + ", props=" + mSystemProps.size());
@@ -512,7 +517,7 @@ public final class PlayIntegritySpoofService {
         if (isVending) {
             if (mSpoofVendingBuild) {
                 for (Map.Entry<String, String> entry : mBuildFields.entrySet()) {
-                    spoofField(entry.getKey(), entry.getValue(), "PS");
+                    spoofField(entry.getKey(), entry.getValue(), "PS", true);
                 }
             } else if (mSpoofVendingSdk) {
                 spoofSdkInt();
@@ -809,6 +814,11 @@ public final class PlayIntegritySpoofService {
     }
 
     private boolean spoofField(String fieldName, String value, String logSuffix) {
+        return spoofField(fieldName, value, logSuffix, false);
+    }
+
+    private boolean spoofField(String fieldName, String value, String logSuffix,
+            boolean stringsOnly) {
         if (value == null || value.isEmpty()) {
             if (mVerboseLogs > 0) Log.d(TAG, fieldName + " is empty, skipping");
             return false;
@@ -835,11 +845,24 @@ public final class PlayIntegritySpoofService {
                 return true;
             }
 
-            if (field.getType() != String.class) {
+            final Class<?> type = field.getType();
+            final Object newValue;
+            if (type == String.class) {
+                newValue = value;
+            } else if (stringsOnly) {
+                return false;
+            } else if (type == int.class) {
+                newValue = Integer.parseInt(value);
+            } else if (type == long.class) {
+                newValue = Long.parseLong(value);
+            } else if (type == boolean.class) {
+                newValue = Boolean.parseBoolean(value);
+            } else {
+                if (mVerboseLogs > 1) Log.d(TAG, "Unsupported type " + type + " for " + fieldName);
                 return false;
             }
 
-            setStaticField(field, value);
+            setStaticField(field, newValue);
 
             if (mVerboseLogs > 0 || mDebug) {
                 Log.d(TAG + "/Java:" + logSuffix, "[" + fieldName + "]: " + oldValue + " -> " + value);

@@ -540,8 +540,6 @@ public final class PlayIntegritySpoofService {
 
         Map<String, String> props = new HashMap<>(mSystemProps);
 
-        props.putIfAbsent("init.svc.adbd", "stopped");
-        props.putIfAbsent("sys.usb.state", "mtp");
         props.putIfAbsent("ro.board.first_api_level", "32");
 
         String initialSdk = resolveDeviceInitialSdk(

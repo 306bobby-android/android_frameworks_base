@@ -595,9 +595,9 @@ public final class PlayIntegritySpoofService {
             boolean ok = nativeSpoofProperties(keys, values, mDebug || mVerboseLogs > 0);
             if (ok) {
                 mPropsSpoofed = true;
-                Log.i(TAG, "Property area virtualization active (" + keys.length + " rules)");
+                Log.i(TAG, "Property overrides active (" + keys.length + " rules)");
             } else {
-                Log.w(TAG, "Property area virtualization returned false");
+                Log.w(TAG, "Property overrides were not applied");
             }
         } catch (Throwable t) {
             Log.e(TAG, "Failed to run nativeSpoofProperties", t);

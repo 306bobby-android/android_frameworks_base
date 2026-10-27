@@ -30,6 +30,8 @@ import android.util.Slog;
 import com.android.internal.os.BackgroundThread;
 import com.android.server.SystemService;
 
+import org.json.JSONObject;
+
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -40,6 +42,8 @@ public final class AxSpoofManagerService extends SystemService {
     private static final String VENDING_PACKAGE = "com.android.vending";
     private static final String DROIDGUARD_PROCESS = "com.google.android.gms.unstable";
     private static final String PHOTOS_PACKAGE = "com.google.android.apps.photos";
+
+    private static final int PIF_CONFIG_VERSION = 1;
 
     private static final String[] WATCHED_KEYS = {
             Settings.Secure.SPOOF_PIF_CONFIG,
@@ -80,6 +84,7 @@ public final class AxSpoofManagerService extends SystemService {
         final int userId = to.getUserIdentifier();
         BackgroundThread.getHandler().post(() -> {
             mUserId = userId;
+            maybeMigratePifConfig();
             refreshAll();
             maybeSeedDefaultTargets(false);
             Slog.i(TAG, "Spoof config reloaded for user " + userId);
@@ -93,6 +98,8 @@ public final class AxSpoofManagerService extends SystemService {
             return;
         }
         mUserId = ActivityManager.getCurrentUser();
+        // Before the observer, so a migrated config doesn't restart the targets.
+        maybeMigratePifConfig();
         refreshAll();
         registerObserver();
         mReady = true;
@@ -156,6 +163,38 @@ public final class AxSpoofManagerService extends SystemService {
     private String readSetting(String key) {
         final int userId = mReady ? mUserId : UserHandle.USER_CURRENT;
         return Settings.Secure.getStringForUser(mResolver, key, userId);
+    }
+
+    /**
+     * Settings used to write spoofVendingBuild=true into every config it fetched, back
+     * when that was the default. Drop it once so those configs pick up the new default;
+     * the version marker keeps a later explicit opt-in from being undone.
+     */
+    private void maybeMigratePifConfig() {
+        try {
+            int version = Settings.Secure.getIntForUser(
+                    mResolver, Settings.Secure.SPOOF_PIF_CONFIG_VERSION, 0, mUserId);
+            if (version >= PIF_CONFIG_VERSION) {
+                return;
+            }
+            String config = Settings.Secure.getStringForUser(
+                    mResolver, Settings.Secure.SPOOF_PIF_CONFIG, mUserId);
+            if (config != null && config.trim().startsWith("{")) {
+                JSONObject json = new JSONObject(config);
+                String vending = json.optString("spoofVendingBuild", "");
+                if ("1".equals(vending) || "true".equalsIgnoreCase(vending)) {
+                    json.remove("spoofVendingBuild");
+                    Settings.Secure.putStringForUser(mResolver,
+                            Settings.Secure.SPOOF_PIF_CONFIG, json.toString(2), mUserId);
+                    Slog.i(TAG, "Dropped old spoofVendingBuild default from PIF config (user "
+                            + mUserId + ")");
+                }
+            }
+            Settings.Secure.putIntForUser(mResolver,
+                    Settings.Secure.SPOOF_PIF_CONFIG_VERSION, PIF_CONFIG_VERSION, mUserId);
+        } catch (Throwable t) {
+            Slog.w(TAG, "Failed to migrate PIF config", t);
+        }
     }
 
     /**

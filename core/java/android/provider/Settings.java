@@ -15476,6 +15476,12 @@ public final class Settings {
         public static final String SPOOF_PIF_PHOTOS = "spoof_pif_photos";
 
         /**
+         * Last PIF config migration applied by AxSpoofManagerService.
+         * @hide
+         */
+        public static final String SPOOF_PIF_CONFIG_VERSION = "spoof_pif_config_version";
+
+        /**
          * @hide
          */
         public static final String SPOOF_GAMEPROPS_CONFIG = "spoof_gameprops_config";

@@ -185,7 +185,7 @@ public final class PlayIntegritySpoofService {
     private volatile boolean mSpoofProps = true;
     private volatile boolean mSpoofProvider = false;
     private volatile boolean mSpoofSignature = false;
-    private volatile boolean mSpoofVendingBuild = true;
+    private volatile boolean mSpoofVendingBuild = false;
     private volatile boolean mSpoofVendingSdk = false;
     private volatile boolean mSpoofPhotos = false;
     private volatile boolean mDebug = false;
@@ -268,7 +268,7 @@ public final class PlayIntegritySpoofService {
         mSpoofProps = true;
         mSpoofProvider = false;
         mSpoofSignature = false;
-        mSpoofVendingBuild = true;
+        mSpoofVendingBuild = false;
         mSpoofVendingSdk = false;
         mDebug = false;
         mDeviceInitialSdkInt = "";

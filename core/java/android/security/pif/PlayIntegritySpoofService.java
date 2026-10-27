@@ -187,6 +187,8 @@ public final class PlayIntegritySpoofService {
     private volatile boolean mSpoofSignature = false;
     private volatile boolean mSpoofVendingBuild = false;
     private volatile boolean mSpoofVendingSdk = false;
+    private volatile String mSpoofVendingFinger = "";
+    private volatile String mVendingFingerprint = "";
     private volatile boolean mSpoofPhotos = false;
     private volatile boolean mDebug = false;
 
@@ -270,6 +272,8 @@ public final class PlayIntegritySpoofService {
         mSpoofSignature = false;
         mSpoofVendingBuild = false;
         mSpoofVendingSdk = false;
+        mSpoofVendingFinger = "";
+        mVendingFingerprint = "";
         mDebug = false;
         mDeviceInitialSdkInt = "";
 
@@ -288,6 +292,7 @@ public final class PlayIntegritySpoofService {
             if (fingerprint != null && !fingerprint.isEmpty()) {
                 expandFingerprint(fingerprint);
             }
+            mVendingFingerprint = resolveVendingFingerprint(mSpoofVendingFinger, fingerprint);
 
             if (mBuildFields.isEmpty() && mSystemProps.isEmpty()) {
                 mConfigLoaded = false;
@@ -392,6 +397,9 @@ public final class PlayIntegritySpoofService {
             case "spoofVendingSdk":
                 mSpoofVendingSdk = "1".equals(value) || "true".equalsIgnoreCase(value);
                 break;
+            case "spoofVendingFinger":
+                mSpoofVendingFinger = value;
+                break;
             case "DEBUG":
                 mDebug = "1".equals(value) || "true".equalsIgnoreCase(value);
                 break;
@@ -406,6 +414,18 @@ public final class PlayIntegritySpoofService {
                 }
                 break;
         }
+    }
+
+    /** PIFork semantics: 0 is off, 1 uses the config FINGERPRINT, anything else is used as is. */
+    private static String resolveVendingFingerprint(String setting, String fingerprint) {
+        if (setting == null || setting.isEmpty() || "0".equals(setting)
+                || "false".equalsIgnoreCase(setting)) {
+            return "";
+        }
+        if ("1".equals(setting) || "true".equalsIgnoreCase(setting)) {
+            return fingerprint != null ? fingerprint : "";
+        }
+        return setting;
     }
 
     private void expandFingerprint(String fingerprint) {
@@ -521,6 +541,8 @@ public final class PlayIntegritySpoofService {
                 }
             } else if (mSpoofVendingSdk) {
                 spoofSdkInt();
+            } else if (!mVendingFingerprint.isEmpty()) {
+                spoofField("FINGERPRINT", mVendingFingerprint, "PS");
             }
             return;
         }

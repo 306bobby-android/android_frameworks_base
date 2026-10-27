@@ -292,6 +292,7 @@ struct Mapping {
     char permLetter = 's';
     int fd = -1;
     bool replaced = false;
+    bool failed = false;
 };
 
 struct Override {
@@ -302,6 +303,9 @@ struct Override {
     bool wasLong = false;
     uintptr_t longOffset = 0;
     size_t longLen = 0;
+    std::vector<char> saved;
+    std::vector<char> savedResidue;
+    bool applied = false;
 };
 
 struct State {
@@ -539,21 +543,45 @@ bool remapPrivate(Mapping& mapping) {
     return true;
 }
 
-bool applyOverride(const Mapping& mapping, const Override& override) {
+bool overrideFits(const Mapping& mapping, const Override& override) {
     const size_t length = mapping.end - mapping.start;
     if (override.offset + sizeof(InlinePropertyInfo) > length) {
         return false;
     }
-
-    auto* info = reinterpret_cast<InlinePropertyInfo*>(mapping.start + override.offset);
-
     if (override.wasLong) {
         const size_t residueStart = override.offset + override.longOffset;
         if (residueStart < override.offset || override.longLen >= length ||
             residueStart + override.longLen + 1 > length) {
             return false;
         }
-        memset(reinterpret_cast<void*>(mapping.start + residueStart), 0,
+    }
+    return true;
+}
+
+void saveOriginal(const Mapping& mapping, Override& override) {
+    const char* base = reinterpret_cast<const char*>(mapping.start + override.offset);
+    override.saved.assign(base, base + sizeof(InlinePropertyInfo));
+    if (override.wasLong) {
+        const char* residue = base + override.longOffset;
+        override.savedResidue.assign(residue, residue + override.longLen + 1);
+    }
+}
+
+void restoreOriginal(const Mapping& mapping, const Override& override) {
+    char* base = reinterpret_cast<char*>(mapping.start + override.offset);
+    memcpy(base, override.saved.data(), override.saved.size());
+    if (!override.savedResidue.empty()) {
+        memcpy(base + override.longOffset, override.savedResidue.data(),
+               override.savedResidue.size());
+    }
+}
+
+// Caller must have checked overrideFits().
+void applyOverride(const Mapping& mapping, const Override& override) {
+    auto* info = reinterpret_cast<InlinePropertyInfo*>(mapping.start + override.offset);
+
+    if (override.wasLong) {
+        memset(reinterpret_cast<void*>(mapping.start + override.offset + override.longOffset), 0,
                override.longLen + 1);
     }
 
@@ -575,18 +603,27 @@ bool applyOverride(const Mapping& mapping, const Override& override) {
     __atomic_thread_fence(__ATOMIC_RELEASE);
     const uint32_t hidden = lenFlags | ((serialDirty & ~1U) & kCounterMask);
     __atomic_store_n(&info->serial, hidden, __ATOMIC_RELAXED);
-    return true;
 }
 
-bool verifyMappingsIdentity(const std::vector<Mapping*>& affected) {
+bool verifyOverride(const Mapping& mapping, const Override& override) {
+    char value[PROP_VALUE_MAX] = {};
+    const prop_info* info = __system_property_find(override.name.c_str());
+    const int valueLength = __system_property_get(override.name.c_str(), value);
+    auto* expected = reinterpret_cast<const InlinePropertyInfo*>(mapping.start + override.offset);
+    return reinterpret_cast<const prop_info*>(expected) == info && valueLength >= 0 &&
+           override.value == value && expected->value == override.value;
+}
+
+// Returns the mappings whose VMA no longer looks like our private copy of the area.
+std::vector<Mapping*> findIdentityFailures(const std::vector<Mapping*>& affected) {
     FILE* maps = fopen("/proc/self/maps", "r");
     if (maps == nullptr) {
         ALOGE("[PROP-VIRT] cannot reopen /proc/self/maps: %s", strerror(errno));
-        return false;
+        return affected;
     }
 
     std::vector<Mapping*> pending = affected;
-    bool ok = true;
+    std::vector<Mapping*> failures;
     char line[512];
     while (!pending.empty() && fgets(line, sizeof(line), maps) != nullptr) {
         MapsLine entry = {};
@@ -598,7 +635,8 @@ bool verifyMappingsIdentity(const std::vector<Mapping*>& affected) {
         if (it == pending.end()) {
             continue;
         }
-        const Mapping& mapping = **it;
+        Mapping* found = *it;
+        const Mapping& mapping = *found;
         pending.erase(it);
 
         const char access[4] = {
@@ -615,17 +653,17 @@ bool verifyMappingsIdentity(const std::vector<Mapping*>& affected) {
                            strncmp(entry.permissions, access, 3) == 0;
         if (!match) {
             ALOGE("[PROP-VIRT] identity check failed for %s", mapping.path.c_str());
-            ok = false;
+            failures.push_back(found);
         }
     }
     fclose(maps);
 
-    for (const Mapping* mapping : pending) {
+    for (Mapping* mapping : pending) {
         ALOGE("[PROP-VIRT] VMA at start=%p for %s vanished from /proc/self/maps",
               reinterpret_cast<void*>(mapping->start), mapping->path.c_str());
-        ok = false;
+        failures.push_back(mapping);
     }
-    return ok;
+    return failures;
 }
 
 void cleanup(std::vector<Mapping>& mappings) {
@@ -637,19 +675,19 @@ void cleanup(std::vector<Mapping>& mappings) {
     }
 }
 
-void rollback(std::vector<Mapping>& mappings, bool debug) {
-    for (auto& mapping : mappings) {
-        if (!mapping.replaced || mapping.fd < 0) continue;
-        const int flags = MAP_FIXED | (mapping.permLetter == 's' ? MAP_SHARED : MAP_PRIVATE);
-        void* restored = mmap(reinterpret_cast<void*>(mapping.start), mapping.end - mapping.start,
-                              mapping.prot, flags, mapping.fd, 0);
-        if (debug) {
-            ALOGD("[PROP-VIRT] rollback %s %s", mapping.path.c_str(),
-                  restored == MAP_FAILED ? "failed" : "ok");
-        }
-        if (restored != MAP_FAILED) {
-            mapping.replaced = false;
-        }
+// Maps the original area back over our copy, dropping every override in it.
+void restoreMapping(Mapping& mapping, bool debug) {
+    mapping.failed = true;
+    if (!mapping.replaced || mapping.fd < 0) return;
+    const int flags = MAP_FIXED | (mapping.permLetter == 's' ? MAP_SHARED : MAP_PRIVATE);
+    void* restored = mmap(reinterpret_cast<void*>(mapping.start), mapping.end - mapping.start,
+                          mapping.prot, flags, mapping.fd, 0);
+    if (debug) {
+        ALOGD("[PROP-VIRT] restore %s %s", mapping.path.c_str(),
+              restored == MAP_FAILED ? "failed" : "ok");
+    }
+    if (restored != MAP_FAILED) {
+        mapping.replaced = false;
     }
 }
 
@@ -667,77 +705,77 @@ bool install(State& state) {
         return false;
     }
 
+    // A failure only drops the override or area it hits, so one bad prop can't
+    // leave DroidGuard with spoofed Build fields but real properties.
     std::vector<Mapping*> affected;
     for (const auto& override : state.overrides) {
-        Mapping* mapping = override.mapping;
-        if (mapping == nullptr) {
-            cleanup(state.mappings);
-            return false;
-        }
-        if (std::find(affected.begin(), affected.end(), mapping) == affected.end()) {
-            affected.push_back(mapping);
+        if (std::find(affected.begin(), affected.end(), override.mapping) == affected.end()) {
+            affected.push_back(override.mapping);
         }
     }
 
     for (Mapping* mapping : affected) {
         if (!preflightOpen(*mapping)) {
-            cleanup(state.mappings);
-            return false;
+            mapping->failed = true;
+        } else if (!remapPrivate(*mapping)) {
+            restoreMapping(*mapping, state.debug);
         }
+    }
+
+    for (auto& override : state.overrides) {
+        Mapping& mapping = *override.mapping;
+        if (mapping.failed) continue;
+        if (!overrideFits(mapping, override)) {
+            ALOGE("[PROP-VIRT] cannot patch %s; skipping", override.name.c_str());
+            continue;
+        }
+        saveOriginal(mapping, override);
+        applyOverride(mapping, override);
+        if (!verifyOverride(mapping, override)) {
+            ALOGE("[PROP-VIRT] verification failed for %s; skipping", override.name.c_str());
+            restoreOriginal(mapping, override);
+            continue;
+        }
+        override.applied = true;
     }
 
     for (Mapping* mapping : affected) {
-        if (!remapPrivate(*mapping)) {
-            rollback(state.mappings, state.debug);
-            cleanup(state.mappings);
-            return false;
+        if (mapping->failed) continue;
+        const bool used = std::any_of(state.overrides.begin(), state.overrides.end(),
+                [&](const Override& o) { return o.mapping == mapping && o.applied; });
+        // Nothing to keep, so don't leave the area frozen as a private copy.
+        if (!used) {
+            restoreMapping(*mapping, state.debug);
+            continue;
         }
-    }
-
-    for (const auto& override : state.overrides) {
-        if (override.mapping == nullptr || !applyOverride(*override.mapping, override)) {
-            ALOGE("[PROP-VIRT] cannot patch %s", override.name.c_str());
-            rollback(state.mappings, state.debug);
-            cleanup(state.mappings);
-            return false;
-        }
-    }
-
-    for (Mapping* mapping : affected) {
         if (mprotect(reinterpret_cast<void*>(mapping->start), mapping->end - mapping->start,
                      mapping->prot) != 0) {
             ALOGE("[PROP-VIRT] cannot restore protections on %s: %s", mapping->path.c_str(),
                   strerror(errno));
-            rollback(state.mappings, state.debug);
-            cleanup(state.mappings);
-            return false;
+            restoreMapping(*mapping, state.debug);
         }
     }
 
-    for (const auto& override : state.overrides) {
-        char value[PROP_VALUE_MAX] = {};
-        const prop_info* info = __system_property_find(override.name.c_str());
-        const int valueLength = __system_property_get(override.name.c_str(), value);
-        auto* expected = reinterpret_cast<const InlinePropertyInfo*>(override.mapping->start +
-                                                                     override.offset);
-        if (reinterpret_cast<const prop_info*>(expected) != info || valueLength < 0 ||
-            override.value != value || expected->value != override.value) {
-            ALOGE("[PROP-VIRT] verification failed for %s", override.name.c_str());
-            rollback(state.mappings, state.debug);
-            cleanup(state.mappings);
-            return false;
-        }
+    std::vector<Mapping*> live;
+    for (Mapping* mapping : affected) {
+        if (!mapping->failed) live.push_back(mapping);
     }
-    if (!verifyMappingsIdentity(affected)) {
-        rollback(state.mappings, state.debug);
-        cleanup(state.mappings);
-        return false;
+    for (Mapping* mapping : findIdentityFailures(live)) {
+        restoreMapping(*mapping, state.debug);
     }
 
     cleanup(state.mappings);
-    if (state.debug) {
-        ALOGD("[PROP-VIRT] installed %zu overrides across %zu areas",
-              state.overrides.size(), affected.size());
+
+    const size_t applied = std::count_if(state.overrides.begin(), state.overrides.end(),
+            [](const Override& o) { return o.applied && !o.mapping->failed; });
+    if (applied == 0) {
+        ALOGE("[PROP-VIRT] no overrides could be applied");
+        return false;
+    }
+    if (applied < state.overrides.size()) {
+        ALOGW("[PROP-VIRT] installed %zu of %zu overrides", applied, state.overrides.size());
+    } else if (state.debug) {
+        ALOGD("[PROP-VIRT] installed %zu overrides across %zu areas", applied, live.size());
     }
     return true;
 }

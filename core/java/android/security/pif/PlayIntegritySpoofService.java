@@ -551,8 +551,6 @@ public final class PlayIntegritySpoofService {
         putPropIfPresent(props, "ro.build.id", mBuildFields.get("ID"));
         putPropIfPresent(props, "ro.product.device", mBuildFields.get("DEVICE"));
         putPropIfPresent(props, "ro.product.name", mBuildFields.get("PRODUCT"));
-        putPropIfPresent(props, "ro.product.brand", mBuildFields.get("BRAND"));
-        putPropIfPresent(props, "ro.product.model", mBuildFields.get("MODEL"));
         putPropIfPresent(props, "ro.build.version.security_patch", mBuildFields.get("SECURITY_PATCH"));
 
         if (props.isEmpty()) return;
